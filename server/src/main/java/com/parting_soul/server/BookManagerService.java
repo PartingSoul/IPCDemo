@@ -4,6 +4,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.IBinder;
 import android.os.RemoteException;
+import android.os.SystemClock;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,6 +35,12 @@ public class BookManagerService extends Service {
         @Override
         public void updateBookMsg(Book book) throws RemoteException {
             book.setDescription("更新信息");
+        }
+
+        @Override
+        public void getData() throws RemoteException {
+            SystemClock.sleep(5 * 1000);
+            Log.d("方法执行完成");
         }
 
         @Override

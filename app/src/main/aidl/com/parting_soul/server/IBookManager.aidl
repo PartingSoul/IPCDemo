@@ -21,4 +21,5 @@ interface IBookManager {
 
    void updateBookMsg(inout Book book);
 
+   oneway void getData();
 }

@@ -22,6 +22,11 @@
                 <action android:name="com.parting_soul.BookManagerService" />
             </intent-filter>
         </service>
+        <service android:name=".MessengerService">
+            <intent-filter>
+                <action android:name="com.parting_soul.MessengerService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>
