@@ -18,6 +18,7 @@
         </activity>
         <activity android:name=".AIDLActivity" />
         <activity android:name=".MessengerActivity" />
+        <activity android:name=".AIDLAdvancedActivity" />
     </application>
 
 </manifest>

@@ -25,6 +25,9 @@ public class MainActivity extends AppCompatActivity {
             case R.id.bt_messenger:
                 clazz = MessengerActivity.class;
                 break;
+            case R.id.bt_aidl_Advanced:
+                clazz = AIDLAdvancedActivity.class;
+                break;
             default:
                 break;
         }

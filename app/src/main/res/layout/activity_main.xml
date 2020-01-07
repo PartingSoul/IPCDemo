@@ -11,7 +11,14 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:onClick="onClick"
-        android:text="aidl" />
+        android:text="aidl入门" />
+
+    <Button
+        android:id="@+id/bt_aidl_Advanced"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:onClick="onClick"
+        android:text="aidl进阶" />
 
     <Button
         android:id="@+id/bt_messenger"

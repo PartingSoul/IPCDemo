@@ -17,16 +17,15 @@
             </intent-filter>
         </activity>
 
-        <service android:name=".BookManagerService">
-            <intent-filter>
-                <action android:name="com.parting_soul.BookManagerService" />
-            </intent-filter>
-        </service>
-        <service android:name=".MessengerService">
-            <intent-filter>
-                <action android:name="com.parting_soul.MessengerService" />
-            </intent-filter>
-        </service>
+        <service
+            android:name=".BookManagerService"
+            android:exported="true" />
+        <service
+            android:name=".MessengerService"
+            android:exported="true" />
+        <service
+            android:name=".BookManagerService2"
+            android:exported="true" />
     </application>
 
 </manifest>
