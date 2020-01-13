@@ -3,6 +3,7 @@ package com.parting_soul.server;
 import android.app.Service;
 import android.content.Intent;
 import android.os.IBinder;
+import android.os.Parcel;
 import android.os.RemoteCallbackList;
 import android.os.RemoteException;
 import android.os.SystemClock;
@@ -38,11 +39,13 @@ public class BookManagerService2 extends Service {
 
     @Override
     public IBinder onBind(Intent intent) {
+        //判断调用方是否有权限
         return new IBookManager2.Stub() {
             @Override
             public void insert(Book book) throws RemoteException {
                 mBookLists.add(book);
                 notifyBookChanged(book);
+                Log.d("插入书籍 " + book);
             }
 
             @Override
@@ -70,6 +73,23 @@ public class BookManagerService2 extends Service {
                 Log.d("unregister IBinder " + callback.asBinder() + "");
                 Log.d("unregister callback " + callback);
             }
+
+            // 该方法会在客户端远程调用服务端方法前被调用
+            @Override
+            public boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+                String packageName = null;
+                String[] packages = getPackageManager().getPackagesForUid(getCallingUid());
+                if (packages != null && packages.length > 0) {
+                    packageName = packages[0];
+                }
+                if (packageName == null ||
+                        !packageName.startsWith("com.parting_soul")) {
+                    Log.d("权限验证失败");
+                    return false;
+                }
+                return super.onTransact(code, data, reply, flags);
+            }
+
         };
     }
 

@@ -176,20 +176,19 @@ public class AIDLAdvancedActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (isBound && mBookManager != null && mBookManager.asBinder().isBinderAlive()) {
+              try {
+                  Log.d(mOnBookChangedCallback.asBinder() + "");
+                  mBookManager.unregisterBookChangedCallback(mOnBookChangedCallback);
+              } catch (RemoteException e) {
+                  e.printStackTrace();
+              }
+          }
 
-        if (mBookManager != null && mBookManager.asBinder().isBinderAlive()) {
-            try {
-                mBookManager.unregisterBookChangedCallback(mOnBookChangedCallback);
-            } catch (RemoteException e) {
-                e.printStackTrace();
-            }
-        }
-
-        if (isBound) {
-            unbindService(mServiceConnection);
-            isBound = false;
-            mServiceConnection = null;
-        }
+          // 无论远程服务有没有没杀死，都需要解绑，否则会造成内存泄漏
+          unbindService(mServiceConnection);
+          isBound = false;
+          mServiceConnection = null;
     }
 
     private ServiceConnection mServiceConnection = new ServiceConnection() {
@@ -257,9 +256,7 @@ public void unregisterBookChangedCallback(OnBookChangedCallback callback) throws
 
 我们发现客户端传递到unregisterBookChangedCallback的回调接口不在我们保存的客户端接口列表中，其实进程间的数据传递本质是对象的序列化与反序列化的过程，毕竟两个进程不是位于同一个虚拟机中，拥有不同的内存空间，所以Binder会将客户端的传递过来的对象进行序列化与反序列化，生成一个新的对象副本。
 
-#### 1. RemoteCallbackList
-
-RemoteCallbackList是一个专门用于删除跨进程接口的类。
+由此引出RemoteCallbackList。RemoteCallbackList是一个专门用于删除跨进程接口的类。
 
 修改服务端代码，使用RemoteCallbackList注册和解注册aidl接口参数
 
@@ -333,3 +330,405 @@ public class RemoteCallbackList<E extends IInterface> {
 
 可以看到运行结果和我们的猜想一致，同一个aidl对象传递时，服务端中该aidl对象的IBinder是一样的。
 
+### 二. 权限验证
+
+有时候我们需要限制其他应用来绑定我们的服务，调用服务端的API，此时就需要用到权限验证。
+
+#### 2.1 声明绑定Service必须要有的权限
+
+在Service端声明一个权限
+
+```xml
+ <permission android:name="com.parting_soul.permission_BookManagerService" />
+```
+
+在Service组件添加启动或者绑定该服务所需的权限
+
+```xml
+<service
+         android:name=".BookManagerService2"
+         android:exported="true"
+         android:permission="com.parting_soul.permission_BookManagerService" />
+```
+
+#### 2.2 在onTransact中做权限验证
+
+onTransact 方法会在客户端远程调用服务端方法前被调用，可在该方法做包名校验。
+
+```java
+@Override
+public boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+  String packageName = null;
+  String[] packages = getPackageManager().getPackagesForUid(getCallingUid());
+  if (packages != null && packages.length > 0) {
+    packageName = packages[0];
+  }
+  if (packageName == null ||
+      !packageName.startsWith("com.parting_soul")) {
+    Log.d("权限验证失败");
+    return false;
+  }
+
+  return super.onTransact(code, data, reply, flags);
+}
+```
+
+### 三. 异常情况重新连接服务
+
+常会出现这种状况，客户端还需要使用远程的服务，但是远程服务因为一些原因突然死亡了，这时为了客户端的功能不受影响，需要重新连接远程的服务。
+
+#### 3.1 onServiceDisconnected
+
+该方法与服务的连接丢失时调用，通常是托管服务的进程被杀死了，可以在该方法中重新绑定服务，该方法在主线程中被回调。
+
+```java
+@Override
+public void onServiceDisconnected(ComponentName name) {
+  isBound = false;
+  Log.d("disconnected");
+
+  unbindService(mServiceConnection);
+  bindService();
+}
+```
+
+#### 3.2 死亡代理                                     
+
+声明一个死亡代理对象，当服务端Binder死亡时binderDied方法会在客户端Binder线程中回调，此时可以移除之前的死亡代理，重新绑定服务。
+
+```java
+private IBinder.DeathRecipient mDeathRecipient = new IBinder.DeathRecipient() {
+        @Override
+        public void binderDied() {
+            //当Binder死亡时，该方法会受收到回调
+            Log.d("binderDied ");
+            if (mBookManager == null) {
+                return;
+            }
+            //移除绑定的死亡代理
+            mBookManager.asBinder().unlinkToDeath(mDeathRecipient, 0);
+            mBookManager = null;
+            // 重新绑定服务
+            bindService();
+        }
+    };
+```
+
+在服务绑定成功时，需要给服务端的Binder绑定死亡代理
+
+```java
+ @Override
+public void onServiceConnected(ComponentName name, IBinder service) {
+  Log.d("service connected");
+  try {
+    mBookManager = IBookManager2.Stub.asInterface(service);
+
+    mBookManager.registerBookChangedCallback(mOnBookChangedCallback);
+    mBookManager.asBinder().linkToDeath(mDeathRecipient, 0);
+    isBound = true;
+  } catch (RemoteException e) {
+    e.printStackTrace();
+  }
+}
+```
+
+### 四. AIDL Java层源码分析
+
+当客户端调用bindService时，服务端会返回一个包含服务端业务的Binder对象，客户端就可以通过该Binder对象调用服务端提供的服务。我们在Java层来看看它的实现方式。
+
+在上述例子中，我们创建了一个IBookManager2 aidl接口，用于做进程间的通信。
+
+我们声明了IBookManager2这个aidl文件后，编译项目，项目会在指定的文件夹中创建一个IBookManager2类。
+
+![aidl类生成路径](https://i.postimg.cc/xTgWV3pQ/Xnip2020-01-08-09-54-30.jpg)
+
+这个生成的IBookManager2类的UML类图如下：
+
+![aidl生成类UML](https://i.postimg.cc/BnJs3vCW/aidl.png)
+
+可以看到有几个核心类：
+
+- IBookManager2： 是一个接口，继承了IInterface，该类定义服务端开放给外部的接口，也就是aidl文件中定义的方法
+- Stub： 是一个抽象类，实现了IBookManager2接口以及继承了Binder类，一般服务端Service的onBind方法返回该抽象类的子类实例，在子类示例中实现了具体服务端提供的服务。在客户端调用bindService时，服务端会将该Binder返回至客户端，使得客户端可以调用服务端提供的方法。
+- Proxy: 是一个代理类，实现了IBookManager2接口，这个类作用在客户端，客户端通过该类去调用服务端的方法(客户端和服务端不在同一个为进程中)
+
+#### 4.1 服务端代码
+
+首先看Stub类，服务端Service要给客户端提供服务，需要在onBind方法中返回一个IBinder对象，Stub是一个继承了Binder类，实现了IBookManager2的抽象类，在Service的onBind方法中需要返回一个该类的实现类，在实现类中书写具体的服务逻辑。
+
+```java
+/**
+ * 继承了Binder类，实现了IBookManager2接口
+ */
+public static abstract class Stub extends android.os.Binder implements IBookManager2 {
+
+  /**
+   * Binder的唯一标识符
+   */
+  private static final String DESCRIPTOR = "com.parting_soul.server.IBookManager2";
+
+  public Stub() {
+    //给Binder添加文件描述符
+    this.attachInterface(this, DESCRIPTOR);
+  }
+
+  /**
+   * 将Binder对象转化为IBookManager2接口
+   */
+  public static IBookManager2 asInterface(android.os.IBinder obj) {
+    if ((obj == null)) {
+      return null;
+    }
+    //判断当前服务端与客户端是否在一个进程，若在一进程，会通过描述符找到Binder
+    android.os.IInterface iin = obj.queryLocalInterface(DESCRIPTOR);
+    if (((iin != null) && (iin instanceof IBookManager2))) {
+      // IInterface不为空表示服务端和客户端在同一个进程中
+      return ((IBookManager2) iin);
+    }
+    //服务端和客户端不在同一个进程，返回一个用于和服务端通信的代理类
+    return new Stub.Proxy(obj);
+  }
+
+  @Override
+  public android.os.IBinder asBinder() {
+    return this;
+  }
+
+
+  /**
+         * 该方法在服务端被调用
+         *
+         * @param code  客户端调用方法的标识符
+         * @param data  用于获取方法参数的Parcel
+         * @param reply 用于写方法返回值的Parcel
+         * @param flags flag为0标识正常的RPC
+         * @return 返回false, 客户端的请求会失败
+         * @throws android.os.RemoteException
+         */
+  @Override
+  public boolean onTransact(int code, android.os.Parcel data, android.os.Parcel reply, int flags) throws android.os.RemoteException {
+    String descriptor = DESCRIPTOR;
+    switch (code) {
+      case INTERFACE_TRANSACTION: {
+        reply.writeString(descriptor);
+        return true;
+      }
+      case TRANSACTION_insert: {
+        data.enforceInterface(descriptor);
+        com.parting_soul.server.Book _arg0;
+        if ((0 != data.readInt())) {
+          // book 形参不为空，则从Parcel中反序列化出Book对象
+          _arg0 = com.parting_soul.server.Book.CREATOR.createFromParcel(data);
+        } else {
+          _arg0 = null;
+        }
+        // 调用插入方法
+        this.insert(_arg0);
+        reply.writeNoException();
+        return true;
+      }
+      case TRANSACTION_getBookLists: {
+        ...
+          return true;
+      }
+      case TRANSACTION_registerBookChangedCallback: {
+        ...
+          return true;
+      }
+      case TRANSACTION_unregisterBookChangedCallback: {
+        ...
+          return true;
+      }
+      default: {
+        return super.onTransact(code, data, reply, flags);
+      }
+    }
+  }
+
+}
+
+```
+
+该类中有两个方法需要注意asInterface方法与onTransact方法
+
+我们知道，要实现IPC，需要同时在服务端和客户端放入aidl文件，并且两者编译生成的aidl类代码是相同的，因此生成的代码中一部分服务端的API，一部分是客户端的API。
+
+**asInterface方法：** 该方法主要是用于将IBinder转化为IBookManager2对象。若服务端和客户端不在同一个进程中，服务端和客户端调用会出现不同的情况，因此可以通过Binder的唯一标识符判断服务端和客户端是否在同一个进程中，若在同一个进程中，直接将Binder对象强转为IBookManager2；若不是，那么客户端需要通过Binder与服务端进行通信，则创建一个代理的IBookManager2对象，用于发起RPC操作。
+
+```java
+/**
+   * 将Binder对象转化为IBookManager2接口
+   */
+public static IBookManager2 asInterface(android.os.IBinder obj) {
+  if ((obj == null)) {
+    return null;
+  }
+  //判断当前服务端与客户端是否在一个进程，若在一进程，会通过描述符找到Binder
+  android.os.IInterface iin = obj.queryLocalInterface(DESCRIPTOR);
+  if (((iin != null) && (iin instanceof IBookManager2))) {
+    // IInterface不为空表示服务端和客户端在同一个进程中
+    return ((IBookManager2) iin);
+  }
+  //服务端和客户端不在同一个进程，返回一个用于和服务端通信的代理类
+  return new Stub.Proxy(obj);
+}
+```
+
+上述描述中出现了一个问题，为什么当客户端与服务端不再同一个进程中，客户端就无法通过Binder的唯一标识符获取Binder对象？其实客户端使用的IBinder是一个代理的IBinder对象。
+
+```java
+public final class BinderProxy implements IBinder {
+    
+    // 一个指针，指向native中Ibinder对象以及DeathRecipientList的内存空间
+    private final long mNativeData;
+
+    private BinderProxy(long nativeData) {
+        mNativeData = nativeData;
+    }
+
+    // 发起RPC
+    public boolean transact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+    }
+
+
+    // 根据Binder唯一标识符返回IInterface，这里始终返回null, 也就是为什么当客户端和服务端不在一个进程时，返回结果不同的原因
+    public IInterface queryLocalInterface(String descriptor) {
+        return null;
+    }
+
+    ...
+}
+```
+
+客户端的IBinder对象其实BinderProxy对象，在该对象中，我们可以看到queryLocalInterface方法返回的是null，这也就是服务端和客户端不在同一个进程时调用queryLocalInterface有不同返回值的原因。
+
+**onTransact方法：** 当客户端发起远程调用时，该方法会在服务端的Binder线程中被调用，该方法的返回值若为true，标识IPC成功，反之则调用失败。
+
+这里以客户端调用insertBook方法为例
+
+- 从写入形参的Parcel读出形参
+- 调用具体的实现方法
+- 将返回结果写入Parcel
+
+```java
+@Override
+public boolean onTransact(int code, android.os.Parcel data, android.os.Parcel reply, int flags) throws android.os.RemoteException {
+    String descriptor = DESCRIPTOR;
+    // code用于标识客户端调用的方法
+    switch (code) {
+        case INTERFACE_TRANSACTION: {
+            reply.writeString(descriptor);
+            return true;
+        }
+        case TRANSACTION_insert: {
+            // 插入书籍的方法
+            data.enforceInterface(descriptor);
+            com.parting_soul.server.Book _arg0;
+            if ((0 != data.readInt())) {
+                // book 形参不为空，则从Parcel中反序列化出Book对象
+                _arg0 = com.parting_soul.server.Book.CREATOR.createFromParcel(data);
+            } else {
+                _arg0 = null;
+            }
+            // 调用插入方法
+            this.insert(_arg0);
+            reply.writeNoException();
+            return true;
+        }
+        ... 
+    }
+}
+```
+
+#### 4.2 客户端代码
+
+现在来看客户端，客户端在绑定Service成功后，会获取到一个IBinder对象，该对象类型为BindProxy，是服务端返回Binder的代理类。由于客户端需要调用服务端提供的API，所以需要将该BindProxy对象转化为具体的接口类型。
+
+```java
+public static IBookManager2 asInterface(android.os.IBinder obj) {
+  if ((obj == null)) {
+    return null;
+  }
+  //判断当前服务端与客户端是否在一个进程，若在一进程，会通过描述符找到Binder
+  android.os.IInterface iin = obj.queryLocalInterface(DESCRIPTOR);
+  if (((iin != null) && (iin instanceof IBookManager2))) {
+    // IInterface不为空表示服务端和客户端在同一个进程中
+    return ((IBookManager2) iin);
+  }
+  //服务端和客户端不在同一个进程，返回一个用于和服务端通信的代理类
+  return new Stub.Proxy(obj);
+}
+```
+
+从上述代码可以知道，当客户端与服务端不再同一个进程中，客户端得到的是一个Stub.Proxy对象，该对象实现了IBookManager2并且有一个为类型为BindProxy的成员属性。
+
+```java
+/**
+ * 客户端与服务端通信的代理类，具体用于的通信对象是成员属性IBinder
+ */
+private static class Proxy implements IBookManager2 {
+    // 用于通信的具体对象，该对象类型为BinderProxy
+    private android.os.IBinder mRemote;
+
+    Proxy(android.os.IBinder remote) {
+        mRemote = remote;
+    }
+
+    @Override
+    public android.os.IBinder asBinder() {
+        return mRemote;
+    }
+
+    public String getInterfaceDescriptor() {
+        return DESCRIPTOR;
+    }
+
+    @Override
+    public void insert(com.parting_soul.server.Book book) throws android.os.RemoteException {
+        // 创建一个用于写入方法参数和返回值的包裹对象，该包裹对象可通过Binder发送
+        android.os.Parcel _data = android.os.Parcel.obtain();
+        android.os.Parcel _reply = android.os.Parcel.obtain();
+        try {
+            // 写入Binder唯一标识
+            _data.writeInterfaceToken(DESCRIPTOR);
+            if ((book != null)) {
+                //参数不为空，则写入参数
+                _data.writeInt(1);
+                book.writeToParcel(_data, 0);
+            } else {
+                // 对象参数为空，用0标识
+                _data.writeInt(0);
+            }
+            // 发起远程调用，同时当前线程被挂起
+            boolean _status = mRemote.transact(Stub.TRANSACTION_insert, _data, _reply, 0);
+            if (!_status && getDefaultImpl() != null) {
+                // 若远程调用失败，使用默认的方式调用方法
+                getDefaultImpl().insert(book);
+                return;
+            }
+            // 读取返回值中的异常情况
+            _reply.readException();
+        } finally {
+            _reply.recycle();
+            _data.recycle();
+        }
+    }
+
+ 		...
+
+    public static IBookManager2 sDefaultImpl;
+}
+```
+
+客户端可以调服务端的方法，实际上是调用了Proxy类中的方法，例如insert方法，在该方法中创建一个用于写方法形参的Parcel以及一个用于写入返回值的Parcel对象，然后通过IBinder对象发起RPC，同时当前线程会被挂起(这也是客户端调用服务端方法时，尽可能的放在子线程中，防止主线程被阻塞发生ANR)。
+
+#### 4.3 总结
+
+![AIDL Java层流程](https://i.postimg.cc/0N8H9rhn/aidl-Java.png)
+
+1. 客户端绑定服务端的Service，绑定成功后服务端返回一个代理的IBinder对象
+
+2. 将服务端返回的IBinder对象转化成服务端API接口对象。若客户端和服务端在同一个进程中，直接将IBinder对象强转为接口对象；若不在一个进程中，返回一个让客户端调用服务端API的Proxy类
+3. 客户端调用服务端API实际上是通过调用本地的Proxy类，将方法调用所需的形参写入Parcel，调用方法时，通过Binder发送该Parcel，通过客户端线程被挂起
+4. 服务端的onTransact方法被调用，将方法形参从Parcel中读出，调用对应的方法，若有返回值，将返回值写入Parcel，完成服务端的调用
+5. 客户端挂起的线程被唤醒，从Parcel中读出返回值

@@ -36,17 +36,14 @@ public class AIDLActivity extends AppCompatActivity {
         Intent intent = new Intent();
         intent.setClassName("com.parting_soul.server", "com.parting_soul.server.BookManagerService");
         bindService(intent, mServiceConnection, Context.BIND_AUTO_CREATE);
-
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (isBound) {
-            unbindService(mServiceConnection);
-            isBound = false;
-            mServiceConnection = null;
-        }
+        unbindService(mServiceConnection);
+        isBound = false;
+        mServiceConnection = null;
     }
 
     public void onClick(View view) throws RemoteException {

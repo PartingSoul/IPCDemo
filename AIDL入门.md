@@ -333,9 +333,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (isBound) {
-            unbindService(mServiceConnection);
-        }
+        unbindService(mServiceConnection);
     }
 
     public void onClick(View view) throws RemoteException {

@@ -34,6 +34,10 @@ public class AIDLAdvancedActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.act_aidl_advanced);
 
+        bindService();
+    }
+
+    private void bindService() {
         // 绑定服务
         Intent intent = new Intent();
         intent.setClassName("com.parting_soul.server", "com.parting_soul.server.BookManagerService2");
@@ -70,7 +74,8 @@ public class AIDLAdvancedActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
 
-        if (mBookManager != null && mBookManager.asBinder().isBinderAlive()) {
+        Log.d("bound = " + isBound + " " + mBookManager.asBinder().isBinderAlive());
+        if (isBound && mBookManager != null && mBookManager.asBinder().isBinderAlive()) {
             try {
                 Log.d(mOnBookChangedCallback.asBinder() + "");
                 mBookManager.unregisterBookChangedCallback(mOnBookChangedCallback);
@@ -79,21 +84,21 @@ public class AIDLAdvancedActivity extends AppCompatActivity {
             }
         }
 
-        if (isBound) {
-            unbindService(mServiceConnection);
-            isBound = false;
-            mServiceConnection = null;
-        }
+        // 无论远程服务有没有没杀死，都需要解绑，否则会造成内存泄漏
+        unbindService(mServiceConnection);
+        isBound = false;
+        mServiceConnection = null;
     }
 
     private ServiceConnection mServiceConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
-            Log.d("service connected");
+            Log.d("service connected " + service.getClass().getName());
             try {
                 mBookManager = IBookManager2.Stub.asInterface(service);
 
                 mBookManager.registerBookChangedCallback(mOnBookChangedCallback);
+                mBookManager.asBinder().linkToDeath(mDeathRecipient, 0);
                 isBound = true;
             } catch (RemoteException e) {
                 e.printStackTrace();
@@ -103,6 +108,10 @@ public class AIDLAdvancedActivity extends AppCompatActivity {
         @Override
         public void onServiceDisconnected(ComponentName name) {
             isBound = false;
+            Log.d("disconnected");
+
+//            unbindService(mServiceConnection);
+//            bindService();
         }
     };
 
@@ -111,8 +120,24 @@ public class AIDLAdvancedActivity extends AppCompatActivity {
         public void onNewBookArrived(Book book) throws RemoteException {
             //在binder线程中回调
             Log.d("新书到了: " + book.toString());
+
         }
     };
 
+    private IBinder.DeathRecipient mDeathRecipient = new IBinder.DeathRecipient() {
+        @Override
+        public void binderDied() {
+            //当Binder死亡时，该方法会受收到回调
+            Log.d("binderDied ");
+            if (mBookManager == null) {
+                return;
+            }
+            //移除绑定的死亡代理
+            mBookManager.asBinder().unlinkToDeath(mDeathRecipient, 0);
+            mBookManager = null;
+            // 重新绑定服务
+            bindService();
+        }
+    };
 
 }

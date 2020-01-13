@@ -15,4 +15,6 @@ interface IBookManager2 {
 
    void unregisterBookChangedCallback(OnBookChangedCallback callback);
 
+//   void call(in Book a,in Book  b,in Book book);
+
 }
