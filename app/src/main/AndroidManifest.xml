@@ -5,6 +5,7 @@
     <uses-permission android:name="com.parting_soul.permission_BookManagerService" />
 
     <application
+        android:name=".App"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -21,6 +22,7 @@
         <activity android:name=".AIDLActivity" />
         <activity android:name=".MessengerActivity" />
         <activity android:name=".AIDLAdvancedActivity" />
+        <activity android:name=".BinderPoolActivity" />
     </application>
 
 </manifest>

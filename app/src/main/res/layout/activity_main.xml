@@ -27,4 +27,12 @@
         android:onClick="onClick"
         android:text="messenger" />
 
+    <Button
+        android:id="@+id/bt_binderPool"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:onClick="onClick"
+        android:text="BinderPool"
+        android:textAllCaps="false" />
+
 </LinearLayout>

@@ -31,6 +31,9 @@
             android:name=".BookManagerService2"
             android:exported="true"
             android:permission="com.parting_soul.permission_BookManagerService" />
+        <service
+            android:name=".BinderPoolService"
+            android:exported="true" />
     </application>
 
 </manifest>
