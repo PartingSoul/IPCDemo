@@ -2,7 +2,7 @@
 
 ### 一. AIDL方法传递AIDL接口
 
-​	前面介绍了[AIDL的基本用法](./AIDL入门)，其中提到，AIDL的方法形参可以是基本类型、String、Charquence、Parcelable、List以及Map。其实还可以是aidl接口类型。
+​	前面介绍了[AIDL的基本用法]([https://partingsoul.github.io/2020/01/03/AIDL%E5%85%A5%E9%97%A8/](https://partingsoul.github.io/2020/01/03/AIDL入门/))，其中提到，AIDL的方法形参可以是基本类型、String、Charquence、Parcelable、List以及Map，其实还可以是aidl接口类型。
 
 ​	还是之前书本的例子，若现在需要增加一个需求服务端有新书增加时，需要通知订阅的客户端有新书到来。若两者在同一个进程中，我们会使用观察者模式，声明一个通知书本增加的接口，客户端去注册这个接口，服务端保存所有订阅的客户端信息，然后服务端有书本更新时，遍历客户端信息，通知每一个客户端有新书更新。现在两者不再一个进程中，其实也是一样，只需要将用Java声明的接口改为aidl接口即可。
 
@@ -225,9 +225,9 @@ public class AIDLAdvancedActivity extends AppCompatActivity {
 
 在服务端执行指定客户端的取消订阅请求后打印了当前服务端持有的客户端订阅数，若当前客户端退出，可以看一下服务端的订阅数打印结果：
 
-![服务端剩余连接数](https://i.postimg.cc/7h9tyDt3/Xnip2020-01-06-16-50-56.jpg)
+![服务端剩余连接数](https://i.postimg.cc/vH6Vmsn6/binder.jpg)
 
-客户端在退出时，回调用unregisterBookChangedCallback取消订阅，但发现服务端订阅数并没有变化。
+客户端在退出时，会调用unregisterBookChangedCallback取消订阅，但发现服务端订阅数并没有变化。
 
 ```java
 @Override
@@ -252,11 +252,11 @@ public void unregisterBookChangedCallback(OnBookChangedCallback callback) throws
 
 再次进行同样的操作，可以看到执行结果
 
-![执行结果](https://i.postimg.cc/V6VJ6ZG3/Xnip2020-01-06-17-39-05.jpg)
+![执行结果](https://i.postimg.cc/xjXRLBH9/binder-2.jpg)
 
 我们发现客户端传递到unregisterBookChangedCallback的回调接口不在我们保存的客户端接口列表中，其实进程间的数据传递本质是对象的序列化与反序列化的过程，毕竟两个进程不是位于同一个虚拟机中，拥有不同的内存空间，所以Binder会将客户端的传递过来的对象进行序列化与反序列化，生成一个新的对象副本。
 
-由此引出RemoteCallbackList。RemoteCallbackList是一个专门用于删除跨进程接口的类。
+由此引出RemoteCallbackList，RemoteCallbackList是一个专门用于删除跨进程接口的类。
 
 修改服务端代码，使用RemoteCallbackList注册和解注册aidl接口参数
 
@@ -326,7 +326,7 @@ public class RemoteCallbackList<E extends IInterface> {
 
 运行结果：
 
-![IBinder](https://i.postimg.cc/4ycmCH7h/Xnip2020-01-07-16-57-40.jpg)
+![IBinder](https://i.postimg.cc/9QhY5Mkf/aidl.jpg)
 
 可以看到运行结果和我们的猜想一致，同一个aidl对象传递时，服务端中该aidl对象的IBinder是一样的。
 
@@ -440,17 +440,17 @@ public void onServiceConnected(ComponentName name, IBinder service) {
 
 我们声明了IBookManager2这个aidl文件后，编译项目，项目会在指定的文件夹中创建一个IBookManager2类。
 
-![aidl类生成路径](https://i.postimg.cc/xTgWV3pQ/Xnip2020-01-08-09-54-30.jpg)
+![aidl类生成路径](https://i.postimg.cc/kGNDxnvj/aidl.jpg)
 
 这个生成的IBookManager2类的UML类图如下：
 
-![aidl生成类UML](https://i.postimg.cc/BnJs3vCW/aidl.png)
+![aidl生成类UML](https://i.postimg.cc/8C3bYHQ2/aidl.png)
 
 可以看到有几个核心类：
 
 - IBookManager2： 是一个接口，继承了IInterface，该类定义服务端开放给外部的接口，也就是aidl文件中定义的方法
 - Stub： 是一个抽象类，实现了IBookManager2接口以及继承了Binder类，一般服务端Service的onBind方法返回该抽象类的子类实例，在子类示例中实现了具体服务端提供的服务。在客户端调用bindService时，服务端会将该Binder返回至客户端，使得客户端可以调用服务端提供的方法。
-- Proxy: 是一个代理类，实现了IBookManager2接口，这个类作用在客户端，客户端通过该类去调用服务端的方法(客户端和服务端不在同一个为进程中)
+- Proxy: 是一个代理类，实现了IBookManager2接口，这个类作用在客户端，客户端通过该类去调用服务端的方法(客户端和服务端不在同一个进程中)
 
 #### 4.1 服务端代码
 

@@ -18,9 +18,6 @@ allprojects {
     repositories {
         google()
         jcenter()
-        maven {
-            url 'http://101.37.191.20:9091/repository/maven-releases/'
-        }
     }
 }
 
